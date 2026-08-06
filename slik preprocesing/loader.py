@@ -127,15 +127,28 @@ def load_application_dataset(
 # AGGREGATE
 # =============================================================================
 
-def aggregate_file(
+def aggregate_files(
     period: str,
     segment: str,
-) -> Path:
+) -> list[Path]:
     """
-    Aggregate file path.
+    Find all aggregate files for
+    one snapshot period and segment.
+
+    Supported format:
+
+    Prefix_YYYYMM_Segment.parquet
+
+    Prefix_YYYYMM_1_Segment.parquet
+    Prefix_YYYYMM_2_Segment.parquet
+    Prefix_YYYYMM_3_Segment.parquet
     """
 
-    return (
+    # -------------------------------------------------------------------------
+    # SINGLE FILE
+    # -------------------------------------------------------------------------
+
+    single_file = (
 
         AGGREGATE_DIR
 
@@ -147,16 +160,87 @@ def aggregate_file(
 
     )
 
+    # -------------------------------------------------------------------------
+    # MULTI PART FILE
+    # -------------------------------------------------------------------------
+
+    multipart_pattern = (
+
+        f"{AGGREGATE_PREFIX}_{period}_*_{segment}"
+
+        f"{PARQUET_EXTENSION}"
+
+    )
+
+    multipart_files = list(
+
+        AGGREGATE_DIR.glob(
+
+            multipart_pattern,
+
+        )
+
+    )
+
+    # -------------------------------------------------------------------------
+    # RESULT
+    # -------------------------------------------------------------------------
+
+    files = []
+
+    if single_file.exists():
+
+        files.append(
+
+            single_file,
+
+        )
+
+    files.extend(
+
+        multipart_files,
+
+    )
+
+    # -------------------------------------------------------------------------
+    # REMOVE DUPLICATE
+    # -------------------------------------------------------------------------
+
+    files = list(
+
+        dict.fromkeys(
+
+            files
+
+        )
+
+    )
+
+    # -------------------------------------------------------------------------
+    # SORT
+    # -------------------------------------------------------------------------
+
+    files = sorted(
+
+        files,
+
+        key=lambda file: file.name,
+
+    )
+
+    return files
+
 
 def load_aggregate(
     period: str,
     segment: str,
 ) -> pl.DataFrame:
     """
-    Load aggregate dataset.
+    Load all aggregate files for
+    one snapshot period and segment.
     """
 
-    file = aggregate_file(
+    files = aggregate_files(
 
         period,
 
@@ -164,11 +248,73 @@ def load_aggregate(
 
     )
 
-    validate_file(file)
+    # -------------------------------------------------------------------------
+    # VALIDATION
+    # -------------------------------------------------------------------------
 
-    return pl.read_parquet(
+    if len(files) == 0:
 
-        file,
+        raise FileNotFoundError(
+
+            f"No aggregate file found for "
+            f"period={period}, "
+            f"segment={segment}"
+
+        )
+
+    # -------------------------------------------------------------------------
+    # INFORMATION
+    # -------------------------------------------------------------------------
+
+    print(
+
+        f"  {segment:<12} : "
+
+        f"{len(files):,} file(s)"
+
+    )
+
+    for file in files:
+
+        print(
+
+            f"    - {file.name}"
+
+        )
+
+    # -------------------------------------------------------------------------
+    # LOAD
+    # -------------------------------------------------------------------------
+
+    datasets = [
+
+        pl.read_parquet(
+
+            file,
+
+        )
+
+        for file in files
+
+    ]
+
+    # -------------------------------------------------------------------------
+    # SINGLE FILE
+    # -------------------------------------------------------------------------
+
+    if len(datasets) == 1:
+
+        return datasets[0]
+
+    # -------------------------------------------------------------------------
+    # MULTIPLE FILE
+    # -------------------------------------------------------------------------
+
+    return pl.concat(
+
+        datasets,
+
+        how="diagonal_relaxed",
 
     )
 
